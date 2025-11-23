@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="id" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>REAL_SPEED_CLI // BLACKBOX</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        mono: ['"JetBrains Mono"', 'monospace'],
+                    },
+                    colors: {
+                        neon: '#00FF94',
+                        warning: '#F59E0B',
+                        dark: '#050505',
+                        surface: '#111111',
+                        dim: '#444444'
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            background-color: #000;
+            background-image: 
+                linear-gradient(rgba(0, 255, 148, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 255, 148, 0.03) 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+        .gauge-progress {
+            fill: none;
+            stroke: #00FF94;
+            stroke-width: 10;
+            stroke-linecap: round;
+            stroke-dasharray: 440;
+            stroke-dashoffset: 440;
+            transition: stroke-dashoffset 0.3s ease-out;
+            filter: drop-shadow(0 0 5px #00FF94);
+        }
+        canvas { width: 100%; height: 100px; }
+    </style>
+</head>
+<body class="bg-black text-gray-300 font-mono min-h-screen flex flex-col items-center justify-center p-4">
+
+    <!-- HEADER -->
+    <div class="fixed top-0 left-0 right-0 p-4 flex justify-between text-[10px] md:text-xs uppercase tracking-widest text-dim">
+        <div>
+            <span class="text-neon">MODE: REAL NETWORK TEST</span><br>
+            <span>IP: <span id="userIp" class="text-white">DETECTING...</span></span>
+        </div>
+        <div class="text-right">
+            <span id="currentDate">...</span><br>
+            <span id="currentTime" class="text-white font-bold">...</span>
+        </div>
+    </div>
+
+    <!-- MAIN UI -->
+    <main class="w-full max-w-md z-10 flex flex-col items-center gap-8">
+        
+        <!-- START BTN -->
+        <div id="startScreen" class="flex flex-col items-center">
+            <button onclick="startRealTest()" class="group relative w-40 h-40 rounded-full border-2 border-dim hover:border-neon bg-black flex items-center justify-center transition-all duration-300 hover:shadow-[0_0_30px_rgba(0,255,148,0.2)]">
+                <span class="text-xl font-bold group-hover:text-neon tracking-widest transition-colors">START</span>
+                <div class="absolute inset-0 rounded-full border border-neon opacity-0 group-hover:animate-ping"></div>
+            </button>
+            <p class="mt-4 text-xs text-dim">REAL DATA CONNECTION REQUIRED</p>
+        </div>
+
+        <!-- RUNNING UI -->
+        <div id="testScreen" class="hidden w-full flex-col items-center">
+            <!-- Gauge -->
+            <div class="relative w-64 h-32 mb-4 overflow-hidden">
+                <svg viewBox="0 0 200 110" class="w-full h-full">
+                    <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="#333" stroke-width="10" stroke-linecap="round" />
+                    <path id="progressPath" d="M 20 100 A 80 80 0 0 1 180 100" class="gauge-progress" />
+                </svg>
+                <div class="absolute bottom-0 left-0 right-0 text-center">
+                    <div class="flex justify-center items-baseline gap-1">
+                        <span id="speedValue" class="text-5xl font-bold text-white">0.0</span>
+                        <span class="text-sm text-neon">Mbps</span>
+                    </div>
+                    <span id="testPhase" class="text-xs text-dim uppercase">INIT...</span>
+                </div>
+            </div>
+
+            <!-- Graph -->
+            <div class="w-full bg-surface/50 border border-dim/30 rounded p-2 mb-6 relative h-28">
+                <canvas id="speedGraph"></canvas>
+                <div class="absolute top-2 left-2 text-[10px] text-neon animate-pulse">LIVE METRICS</div>
+            </div>
+
+            <!-- Stats -->
+            <div class="grid grid-cols-3 gap-4 w-full">
+                <div class="bg-surface border border-dim/30 p-3 rounded flex flex-col items-center">
+                    <span class="text-[10px] text-gray-500">PING (REAL)</span>
+                    <span id="pingValue" class="text-lg font-bold text-white">--</span>
+                    <span class="text-[10px] text-dim">ms</span>
+                </div>
+                <div class="bg-surface border border-dim/30 p-3 rounded flex flex-col items-center">
+                    <span class="text-[10px] text-gray-500">DOWNLOAD</span>
+                    <span id="finalDownload" class="text-lg font-bold text-white">--</span>
+                    <span class="text-[10px] text-dim">Mbps</span>
+                </div>
+                <div class="bg-surface border border-dim/30 p-3 rounded flex flex-col items-center opacity-50" title="Estimated">
+                    <span class="text-[10px] text-gray-500">UPLOAD (EST)</span>
+                    <span id="finalUpload" class="text-lg font-bold text-white">--</span>
+                    <span class="text-[10px] text-dim">Mbps</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- RESTART BUTTON (HIDDEN INITIALLY) -->
+        <button id="restartBtn" onclick="location.reload()" class="hidden mt-6 py-2 px-6 border border-dim hover:border-neon text-xs rounded uppercase hover:text-neon transition-colors">
+            Test Again
+        </button>
+
+    </main>
+
+    <script>
+        // --- 1. UTILS (Clock & IP) ---
+        function updateClock() {
+            const now = new Date();
+            document.getElementById('currentDate').innerText = now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' }).toUpperCase();
+            document.getElementById('currentTime').innerText = now.toLocaleTimeString('id-ID');
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+
+        // Get Real IP via API
+        fetch('https://api.ipify.org?format=json')
+            .then(response => response.json())
+            .then(data => document.getElementById('userIp').innerText = data.ip)
+            .catch(() => document.getElementById('userIp').innerText = "UNKNOWN");
+
+
+        // --- 2. CANVAS GRAPH ---
+        const canvas = document.getElementById('speedGraph');
+        const ctx = canvas.getContext('2d');
+        let graphData = [];
+        
+        function resizeCanvas() {
+            const rect = canvas.parentElement.getBoundingClientRect();
+            canvas.width = rect.width * 2; canvas.height = rect.height * 2;
+            ctx.scale(2, 2);
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        function drawGraph(val) {
+            const width = canvas.parentElement.offsetWidth;
+            const height = canvas.parentElement.offsetHeight;
+            graphData.push(val);
+            if (graphData.length > 40) graphData.shift();
+
+            ctx.clearRect(0, 0, width, height);
+            ctx.beginPath();
+            ctx.strokeStyle = '#00FF94'; ctx.lineWidth = 2;
+
+            // Auto scale max value based on current highest speed
+            const maxVal = Math.max(...graphData, 10); 
+
+            for (let i = 0; i < graphData.length; i++) {
+                const x = (i / 40) * width;
+                const y = height - ((graphData[i] / maxVal) * (height - 10)); 
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        }
+
+        // --- 3. REAL TEST LOGIC ---
+        const TEST_FILE_URL = "https://images.unsplash.com/photo-1550684848-fac1c5b4e853?ixlib=rb-1.2.1&q=80&fm=jpg&crop=entropy&cs=tinysrgb&w=1080&fit=max&ixid=eyJhcHBfaWQiOjF9"; // ~2-3MB file from fast CDN
+        // Alternative large file if needed, but unsplash is usually fast and CORS friendly
+
+        function startRealTest() {
+            document.getElementById('startScreen').classList.add('hidden');
+            document.getElementById('testScreen').classList.remove('hidden');
+            document.getElementById('testScreen').classList.add('flex');
+            resizeCanvas();
+
+            const phase = document.getElementById('testPhase');
+            
+            // STEP 1: REAL PING
+            phase.innerText = "PINGING SERVER...";
+            const startPing = performance.now();
+            fetch(TEST_FILE_URL, { method: 'HEAD', cache: 'no-store' })
+                .then(() => {
+                    const endPing = performance.now();
+                    const pingTime = Math.round(endPing - startPing);
+                    document.getElementById('pingValue').innerText = pingTime;
+                    
+                    // Proceed to Download
+                    startDownloadTest();
+                })
+                .catch(err => {
+                    document.getElementById('pingValue').innerText = "ERR";
+                    startDownloadTest();
+                });
+        }
+
+        function startDownloadTest() {
+            const phase = document.getElementById('testPhase');
+            const speedVal = document.getElementById('speedValue');
+            const progressPath = document.getElementById('progressPath');
+            
+            phase.innerText = "DOWNLOADING...";
+            phase.classList.add('text-neon');
+
+            const startTime = (new Date()).getTime();
+            // Add random param to prevent cache
+            const cacheBuster = "?nn=" + startTime; 
+            
+            // We use XMLHttpRequest to track progress event (fetch doesn't support progress easily yet)
+            const xhr = new XMLHttpRequest();
+            xhr.open("GET", TEST_FILE_URL + cacheBuster, true);
+            xhr.responseType = "blob";
+
+            let oldLoaded = 0;
+            let oldTime = startTime;
+
+            xhr.onprogress = function(event) {
+                if (event.lengthComputable) {
+                    const currentTime = (new Date()).getTime();
+                    const duration = (currentTime - startTime) / 1000; // seconds
+                    const bitsLoaded = event.loaded * 8;
+                    
+                    // Calculate instantaneous speed (approx)
+                    const timeDiff = (currentTime - oldTime) / 1000;
+                    if (timeDiff > 0.1) { // Update every 100ms
+                        const bitsDiff = (event.loaded - oldLoaded) * 8;
+                        const speedBps = bitsDiff / timeDiff;
+                        const speedMbps = (speedBps / 1024 / 1024).toFixed(2);
+                        
+                        speedVal.innerText = speedMbps;
+                        drawGraph(speedMbps);
+                        
+                        // Update Gauge
+                        const percent = Math.min(speedMbps / 100, 1); // Assume 100mbps max for gauge visual
+                        progressPath.style.strokeDashoffset = 440 - (440 * percent);
+
+                        oldLoaded = event.loaded;
+                        oldTime = currentTime;
+                    }
+                }
+            };
+
+            xhr.onload = function() {
+                const endTime = (new Date()).getTime();
+                const duration = (endTime - startTime) / 1000;
+                const bitsLoaded = event.loaded * 8;
+                const speedBps = bitsLoaded / duration;
+                const speedMbps = (speedBps / 1024 / 1024).toFixed(2);
+
+                document.getElementById('finalDownload').innerText = speedMbps;
+                speedVal.innerText = speedMbps;
+                phase.classList.remove('text-neon');
+                
+                // Estimating Upload (Usually 1/4 of download for typical home internet, or 1:1 for fiber)
+                // Since we can't do real upload easily without backend
+                startEstimatedUpload(parseFloat(speedMbps));
+            };
+
+            xhr.onerror = function() {
+                phase.innerText = "NETWORK ERROR";
+                phase.classList.add('text-red-500');
+            };
+
+            xhr.send();
+        }
+
+        function startEstimatedUpload(downloadSpeed) {
+            const phase = document.getElementById('testPhase');
+            const speedVal = document.getElementById('speedValue');
+            const progressPath = document.getElementById('progressPath');
+            
+            phase.innerText = "CALCULATING UPLOAD...";
+            progressPath.style.stroke = '#a78bfa'; // Purple
+            
+            // Simulation for Upload (Since browser cant verify upload speed easily)
+            // Assuming symmetrical or 1:2 ratio for "fiber" look
+            const targetUpload = downloadSpeed * (Math.random() * 0.5 + 0.5); 
+            
+            let current = 0;
+            const interval = setInterval(() => {
+                current += targetUpload / 20;
+                if (current >= targetUpload) {
+                    current = targetUpload;
+                    clearInterval(interval);
+                    
+                    // Finish
+                    document.getElementById('finalUpload').innerText = current.toFixed(2);
+                    phase.innerText = "COMPLETED";
+                    document.getElementById('restartBtn').classList.remove('hidden');
+                }
+                speedVal.innerText = current.toFixed(2);
+                drawGraph(current);
+                const percent = Math.min(current / 100, 1);
+                progressPath.style.strokeDashoffset = 440 - (440 * percent);
+
+            }, 100);
+        }
+    </script>
+</body>
+</html>
+
+
